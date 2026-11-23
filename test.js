@@ -19,5 +19,5 @@ const chase = [
 const c = P.parseStatementPDF(chase);
 assert.equal(c.format,'Chase credit card'); assert.equal(c.transactions.length,3);
 assert.equal(c.transactions[0].date,'2026-12-20'); assert.equal(c.transactions[0].amount,100);
-assert.equal(c.transactions[1].amount,-1234.56); assert.equal(c.transactions[2].date,'2027-01-02');
+assert.equal(c.transactions[1].amount,-1234.56); assert.deepEqual(c.transactions.map(x=>x.date),c.transactions.map(x=>x.date).sort()); assert.equal(c.transactions[2].date,'2027-01-02');
 console.log('chase ok');

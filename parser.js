@@ -127,6 +127,7 @@
       const stmtAmount = money(m[4].replace('$', ''));
       tx.push({ date: fmt(year, m[1], m[2]), description: m[3].replace(/\s+/g, ' ').trim(), amount: -stmtAmount, _stmt: stmtAmount });
     }
+    tx.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)); // stable: statement lists in posting order
     let check = null;
     const prev = text.match(/^Previous Balance\s+(-?)\$([\d,]+\.\d{2})/m);
     const next = text.match(/^New Balance\s+(-?)\$([\d,]+\.\d{2})/m);
