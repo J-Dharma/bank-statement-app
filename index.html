@@ -37,6 +37,7 @@ Everything runs in your browser. Nothing is uploaded anywhere.</p>
     <button id="xlsx">Download .xlsx</button>
     <button id="csv" class="secondary">Download .csv</button>
   </div>
+  <p class="note" id="check" hidden></p>
   <p class="note" id="pdfnote" hidden>PDF parsing is best-effort. Check the amounts and signs below, since many PDFs show purchases as positive numbers.</p>
   <table><thead><tr><th>Date</th><th>Description</th><th class="amt">Amount</th></tr></thead><tbody id="rows"></tbody></table>
 </div>
@@ -70,6 +71,18 @@ async function pdfLines(buf) {
   return lines;
 }
 
+let lastFormat = 'generic';
+function showCheck(res) {
+  lastFormat = res.format;
+  const el = $('check'); el.hidden = false; el.className = 'note';
+  if (res.check) {
+    el.textContent = res.check.ok
+      ? `Detected: ${res.format}. Totals match the statement's balance change.`
+      : `Detected: ${res.format}. Warning: parsed transactions total ${res.check.got.toFixed(2)} but the statement's balance changed by ${res.check.expected.toFixed(2)}. Some rows may be missing.`;
+    if (!res.check.ok) el.style.color = '#b3261e'; else el.style.color = '#1e7b34';
+  } else el.textContent = `Detected: ${res.format}.`;
+}
+
 async function handle(file) {
   $('msg').textContent = ''; $('result').hidden = true;
   baseName = file.name.replace(/\.[^.]+$/, '');
@@ -77,11 +90,14 @@ async function handle(file) {
     const isPdf = /\.pdf$/i.test(file.name);
     if (isPdf) {
       const lines = await pdfLines(await file.arrayBuffer());
-      data = Parser.parseStatementLines(lines, lines.join(' '));
+      const res = Parser.parseStatementPDF(lines);
+      data = res.transactions;
+      showCheck(res);
     } else {
       data = Parser.parseCSVStatement(await file.text());
     }
-    $('pdfnote').hidden = !isPdf;
+    $('pdfnote').hidden = !isPdf || lastFormat !== 'generic';
+    if (!isPdf) $('check').hidden = true;
     if (!data.length) throw new Error('No transactions found. For scanned PDFs, try your bank\'s CSV export instead.');
     render();
   } catch (e) { $('msg').textContent = e.message; }

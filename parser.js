@@ -104,6 +104,48 @@
     return out;
   }
 
-  const api = { parseCSV, parseAmount, normDate, parseCSVStatement, parseStatementLines };
+  const money = s => Math.round(parseFloat(s.replace(/,/g, '')) * 100) / 100;
+
+  // Chase credit card layout: MM/DD <description> <amount>, inside "ACCOUNT ACTIVITY" sections.
+  // Statement signs: charges positive, payments/credits negative. We flip them so that
+  // money out is negative (same as most CSV exports), and reconcile against the summary box.
+  function parseChaseCard(lines) {
+    const text = lines.join('\n');
+    const cd = text.match(/Opening\/Closing Date\s+(\d{2})\/(\d{2})\/(\d{2})\s*-\s*(\d{2})\/(\d{2})\/(\d{2})/);
+    const closeYear = cd ? 2000 + +cd[6] : new Date().getFullYear();
+    const closeMonth = cd ? +cd[4] : 12;
+    const tx = [];
+    let active = false;
+    for (const line of lines) {
+      if (/ACCOUNT\s+(ACCOUNT\s+)?ACTIVITY/.test(line)) { active = true; continue; }
+      if (/Totals Year-to-Date|INTEREST\s+(INTEREST\s+)?CHARGES|\$ Amount\s+Rewards|PURCHASES AND REDEMPTIONS/.test(line)) { active = false; continue; }
+      if (!active) continue;
+      const m = line.match(/^(\d{2})\/(\d{2})\s+(.*?)\s+(-?\$?\d{1,3}(?:,\d{3})*\.\d{2})$/);
+      if (!m) continue;
+      const month = +m[1];
+      const year = month > closeMonth ? closeYear - 1 : closeYear;
+      const stmtAmount = money(m[4].replace('$', ''));
+      tx.push({ date: fmt(year, m[1], m[2]), description: m[3].replace(/\s+/g, ' ').trim(), amount: -stmtAmount, _stmt: stmtAmount });
+    }
+    let check = null;
+    const prev = text.match(/^Previous Balance\s+(-?)\$([\d,]+\.\d{2})/m);
+    const next = text.match(/^New Balance\s+(-?)\$([\d,]+\.\d{2})/m);
+    if (prev && next) {
+      const expected = Math.round((money(next[2]) * (next[1] ? -1 : 1) - money(prev[2]) * (prev[1] ? -1 : 1)) * 100) / 100;
+      const got = Math.round(tx.reduce((a, t) => a + t._stmt, 0) * 100) / 100;
+      check = { expected, got, ok: Math.abs(expected - got) < 0.005 };
+    }
+    tx.forEach(t => delete t._stmt);
+    return { transactions: tx, check, format: 'Chase credit card' };
+  }
+
+  // Entry point for PDFs: pick a bank-specific parser if one matches, else the generic one.
+  function parseStatementPDF(lines) {
+    if (lines.some(l => /Merchant Name or Transaction Description/.test(l)) && lines.some(l => /chase\.com/i.test(l)))
+      return parseChaseCard(lines);
+    return { transactions: parseStatementLines(lines, lines.join(' ')), check: null, format: 'generic' };
+  }
+
+  const api = { parseCSV, parseAmount, normDate, parseCSVStatement, parseStatementLines, parseChaseCard, parseStatementPDF };
   if (typeof module !== 'undefined') module.exports = api; else root.Parser = api;
 })(this);
