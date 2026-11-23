@@ -1,0 +1,10 @@
+const P = require('./parser.js'); const fs = require('fs'); const assert = require('assert');
+const r = P.parseCSVStatement(fs.readFileSync('sample.csv','utf8'));
+console.log(r);
+assert.equal(r.length, 3); assert.equal(r[0].date,'2026-11-03'); assert.equal(r[0].amount,-54.21);
+assert.equal(r[0].description,"TRADER JOE'S #123, SALT LAKE");
+const d = P.parseCSVStatement('Date,Description,Debit,Credit\n2026-01-02,Coffee,4.50,\n2026-01-03,Refund,,10.00\n');
+assert.equal(d[0].amount,-4.5); assert.equal(d[1].amount,10);
+const p = P.parseStatementLines(['11/03 AMAZON MKTPLACE 23.99 1,204.55','11/05 PAYROLL 2,100.00 3,304.55','Page 1 of 2'], 'Statement 2026');
+console.log(p); assert.equal(p[0].amount,23.99); assert.equal(p[0].date,'2026-11-03');
+console.log('ok');

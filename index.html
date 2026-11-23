@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Statement to Spreadsheet</title>
+<style>
+  :root { font-family: system-ui, sans-serif; color: #1c1c1e; }
+  body { max-width: 860px; margin: 2rem auto; padding: 0 1rem; }
+  h1 { margin-bottom: .25rem; }
+  .sub { color: #666; margin-top: 0; }
+  #drop { border: 2px dashed #999; border-radius: 12px; padding: 2.5rem; text-align: center; cursor: pointer; }
+  #drop.over { background: #eef5ff; border-color: #2a6df4; }
+  table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+  th, td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid #e3e3e3; }
+  td.amt, th.amt { text-align: right; font-variant-numeric: tabular-nums; }
+  td.neg { color: #b3261e; }
+  button { padding: .5rem 1rem; border-radius: 8px; border: 1px solid #2a6df4; background: #2a6df4; color: #fff; cursor: pointer; font-size: 1rem; }
+  button.secondary { background: #fff; color: #2a6df4; }
+  #actions { margin-top: 1rem; display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+  #msg { color: #b3261e; margin-top: 1rem; }
+  .note { color: #666; font-size: .9rem; }
+</style>
+</head>
+<body>
+<h1>Statement to Spreadsheet</h1>
+<p class="sub">Upload a bank statement (CSV or PDF) and get a spreadsheet of date, description, and amount.
+Everything runs in your browser. Nothing is uploaded anywhere.</p>
+
+<div id="drop">Drop a statement here, or click to choose a file
+  <input id="file" type="file" accept=".csv,.pdf,text/csv,application/pdf" hidden>
+</div>
+<div id="msg"></div>
+<div id="result" hidden>
+  <div id="actions">
+    <strong id="count"></strong>
+    <button id="xlsx">Download .xlsx</button>
+    <button id="csv" class="secondary">Download .csv</button>
+  </div>
+  <p class="note" id="pdfnote" hidden>PDF parsing is best-effort. Check the amounts and signs below, since many PDFs show purchases as positive numbers.</p>
+  <table><thead><tr><th>Date</th><th>Description</th><th class="amt">Amount</th></tr></thead><tbody id="rows"></tbody></table>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="parser.js"></script>
+<script type="module">
+import * as pdfjsLib from 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.min.mjs';
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.worker.min.mjs';
+
+const $ = id => document.getElementById(id);
+let data = [], baseName = 'statement';
+
+async function pdfLines(buf) {
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  const lines = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const items = (await (await pdf.getPage(p)).getTextContent()).items;
+    const byY = new Map();
+    for (const it of items) {
+      const y = Math.round(it.transform[5]);
+      let key = [...byY.keys()].find(k => Math.abs(k - y) <= 2);
+      if (key === undefined) { key = y; byY.set(key, []); }
+      byY.get(key).push(it);
+    }
+    [...byY.entries()].sort((a, b) => b[0] - a[0]).forEach(([, its]) => {
+      its.sort((a, b) => a.transform[4] - b.transform[4]);
+      lines.push(its.map(i => i.str).join(' ').replace(/\s+/g, ' ').trim());
+    });
+  }
+  return lines;
+}
+
+async function handle(file) {
+  $('msg').textContent = ''; $('result').hidden = true;
+  baseName = file.name.replace(/\.[^.]+$/, '');
+  try {
+    const isPdf = /\.pdf$/i.test(file.name);
+    if (isPdf) {
+      const lines = await pdfLines(await file.arrayBuffer());
+      data = Parser.parseStatementLines(lines, lines.join(' '));
+    } else {
+      data = Parser.parseCSVStatement(await file.text());
+    }
+    $('pdfnote').hidden = !isPdf;
+    if (!data.length) throw new Error('No transactions found. For scanned PDFs, try your bank\'s CSV export instead.');
+    render();
+  } catch (e) { $('msg').textContent = e.message; }
+}
+
+function render() {
+  $('count').textContent = data.length + ' transactions';
+  $('rows').innerHTML = '';
+  for (const r of data) {
+    const tr = document.createElement('tr');
+    for (const [v, cls] of [[r.date, ''], [r.description, ''], [r.amount.toFixed(2), 'amt' + (r.amount < 0 ? ' neg' : '')]]) {
+      const td = document.createElement('td'); td.textContent = v; td.className = cls; tr.appendChild(td);
+    }
+    $('rows').appendChild(tr);
+  }
+  $('result').hidden = false;
+}
+
+function sheet() {
+  const ws = XLSX.utils.json_to_sheet(data.map(r => ({ Date: r.date, 'Charge Description': r.description, Amount: r.amount })));
+  ws['!cols'] = [{ wch: 12 }, { wch: 50 }, { wch: 12 }];
+  return ws;
+}
+$('xlsx').onclick = () => { const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, sheet(), 'Transactions'); XLSX.writeFile(wb, baseName + '.xlsx'); };
+$('csv').onclick = () => {
+  const blob = new Blob([XLSX.utils.sheet_to_csv(sheet())], { type: 'text/csv' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = baseName + '.csv'; a.click();
+};
+
+const drop = $('drop');
+drop.onclick = () => $('file').click();
+$('file').onchange = e => e.target.files[0] && handle(e.target.files[0]);
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); e.dataTransfer.files[0] && handle(e.dataTransfer.files[0]); };
+</script>
+</body>
+</html>
