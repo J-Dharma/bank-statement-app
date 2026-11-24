@@ -6,50 +6,68 @@
 <title>Statement to Spreadsheet</title>
 <style>
   :root { font-family: system-ui, sans-serif; color: #1c1c1e; }
-  body { max-width: 860px; margin: 2rem auto; padding: 0 1rem; }
+  body { max-width: 1000px; margin: 2rem auto; padding: 0 1rem; }
   h1 { margin-bottom: .25rem; }
   .sub { color: #666; margin-top: 0; }
-  #drop { border: 2px dashed #999; border-radius: 12px; padding: 2.5rem; text-align: center; cursor: pointer; }
+  #drop { border: 2px dashed #999; border-radius: 12px; padding: 2rem; text-align: center; cursor: pointer; }
   #drop.over { background: #eef5ff; border-color: #2a6df4; }
-  table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
-  th, td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid #e3e3e3; }
+  table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: .92rem; }
+  th, td { text-align: left; padding: .25rem .5rem; border-bottom: 1px solid #e3e3e3; }
   td.amt, th.amt { text-align: right; font-variant-numeric: tabular-nums; }
   td.neg { color: #1e7b34; }
-  button { padding: .5rem 1rem; border-radius: 8px; border: 1px solid #2a6df4; background: #2a6df4; color: #fff; cursor: pointer; font-size: 1rem; }
+  tr.suggested select { background: #fff8d6; }
+  tr.empty select { background: #ffe9e7; }
+  select { max-width: 200px; font-size: .9rem; }
+  button { padding: .45rem .9rem; border-radius: 8px; border: 1px solid #2a6df4; background: #2a6df4; color: #fff; cursor: pointer; font-size: .95rem; }
   button.secondary { background: #fff; color: #2a6df4; }
-  #actions { margin-top: 1rem; display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
-  #msg { color: #b3261e; margin-top: 1rem; }
+  #actions, #filters { margin-top: 1rem; display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+  #msg { color: #b3261e; margin-top: 1rem; white-space: pre-line; }
   .note { color: #666; font-size: .9rem; }
+  #files { list-style: none; padding: 0; margin: 1rem 0 0; font-size: .9rem; }
+  #files li { padding: .15rem 0; }
+  .ok { color: #1e7b34; } .bad { color: #b3261e; }
+  .legend span { padding: 0 .4rem; border-radius: 4px; }
 </style>
 </head>
 <body>
 <h1>Statement to Spreadsheet</h1>
-<p class="sub">Upload a bank statement (CSV or PDF) and get a spreadsheet of date, description, and amount. Expenses are positive and deposits are negative.
-Everything runs in your browser. Nothing is uploaded anywhere.</p>
+<p class="sub">Upload all of a month's statements (CSV or PDF) and get one combined list of date, description and amount, with a Category column.
+Expenses are positive and deposits are negative. Everything runs in your browser. Nothing is uploaded anywhere.</p>
 
-<div id="drop">Drop a statement here, or click to choose a file
-  <input id="file" type="file" accept=".csv,.pdf,text/csv,application/pdf" hidden>
+<div id="drop">Drop statements here (several at once is fine), or click to choose
+  <input id="file" type="file" accept=".csv,.pdf,text/csv,application/pdf" multiple hidden>
 </div>
+<ul id="files"></ul>
 <div id="msg"></div>
+
 <div id="result" hidden>
-  <div id="actions">
+  <div id="filters">
+    <label>Month <select id="month"></select></label>
     <strong id="count"></strong>
-    <button id="xlsx">Download .xlsx</button>
-    <button id="csv" class="secondary">Download .csv</button>
+    <span class="note legend"><span style="background:#fff8d6">suggested</span> <span style="background:#ffe9e7">needs a category</span></span>
   </div>
-  <p class="note" id="check" hidden></p>
-  <p class="note" id="pdfnote" hidden>PDF parsing is best-effort. Check the amounts and signs below. This layout isn't recognized, so signs are as printed on the statement.</p>
-  <table><thead><tr><th>Date</th><th>Description</th><th class="amt">Amount</th></tr></thead><tbody id="rows"></tbody></table>
+  <div id="actions">
+    <button id="copy">Copy for Excel</button>
+    <button id="xlsx" class="secondary">Download .xlsx</button>
+    <button id="csv" class="secondary">Download .csv</button>
+    <button id="clear" class="secondary">Start over</button>
+    <span class="note" id="copied"></span>
+  </div>
+  <table><thead><tr><th>Date</th><th>Description</th><th class="amt">Amount</th><th>Account</th><th>Category</th></tr></thead><tbody id="rows"></tbody></table>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="parser.js?v=5"></script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<script src="parser.js?v=6"></script>
+<script src="categories.js?v=6"></script>
+<script src="export.js?v=6"></script>
 <script type="module">
 import * as pdfjsLib from 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.min.mjs';
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.worker.min.mjs';
 
 const $ = id => document.getElementById(id);
-let data = [], baseName = 'statement';
+const ACCOUNT_NAMES = { 'Chase credit card': 'Chase', 'Bank account statement': 'DFCU', 'Ally Bank statement': 'Ally' };
+let all = [];             // every row from every file
+const loaded = new Set(); // name+size, to ignore the same file twice
 
 async function pdfLines(buf) {
   const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
@@ -71,69 +89,103 @@ async function pdfLines(buf) {
   return lines;
 }
 
-let lastFormat = 'generic';
-function showCheck(res) {
-  lastFormat = res.format;
-  const el = $('check'); el.hidden = false; el.className = 'note';
-  if (res.check) {
-    el.textContent = res.check.ok
-      ? `Detected: ${res.format}. Totals match the statement's balance change. Expenses are positive, deposits negative.`
-      : `Detected: ${res.format}. Warning: parsed transactions total ${res.check.got.toFixed(2)} but the statement's balance changed by ${res.check.expected.toFixed(2)}. Some rows may be missing.`;
-    if (!res.check.ok) el.style.color = '#b3261e'; else el.style.color = '#1e7b34';
-  } else el.textContent = `Detected: ${res.format}.`;
-  if (!res.check || res.check.ok) el.style.color = res.check ? '#1e7b34' : '';
+function status(text, cls) {
+  const li = document.createElement('li'); li.textContent = text; li.className = cls || '';
+  $('files').appendChild(li);
 }
 
-async function handle(file) {
-  $('msg').textContent = ''; $('result').hidden = true;
-  baseName = file.name.replace(/\.[^.]+$/, '');
+async function handleFile(file) {
+  const key = file.name + ':' + file.size;
+  if (loaded.has(key)) return status(file.name + ': already added, skipped', 'bad');
+  const base = file.name.replace(/\.[^.]+$/, '');
   try {
-    const isPdf = /\.pdf$/i.test(file.name);
-    if (isPdf) {
-      const lines = await pdfLines(await file.arrayBuffer());
-      const res = Parser.parseStatementPDF(lines);
-      data = res.transactions;
-      showCheck(res);
+    let txs, account, note = '', ok = true;
+    if (/\.pdf$/i.test(file.name)) {
+      const res = Parser.parseStatementPDF(await pdfLines(await file.arrayBuffer()));
+      txs = res.transactions;
+      account = ACCOUNT_NAMES[res.format] || base;
+      note = res.format;
+      if (res.check) {
+        ok = res.check.ok;
+        note += ok ? ', totals match the statement'
+          : ', WARNING: rows total ' + res.check.got.toFixed(2) + ' but the statement changed by ' + res.check.expected.toFixed(2);
+      } else if (res.format === 'generic') { ok = false; note += ', layout not recognized: check signs and amounts'; }
     } else {
-      data = Parser.parseCSVStatement(await file.text());
+      txs = Parser.parseCSVStatement(await file.text());
+      account = base; note = 'CSV';
     }
-    $('pdfnote').hidden = !isPdf || lastFormat !== 'generic';
-    if (!isPdf) $('check').hidden = true;
-    if (!data.length) throw new Error('No transactions found. For scanned PDFs, try your bank\'s CSV export instead.');
-    render();
-  } catch (e) { $('msg').textContent = e.message; }
+    if (!txs.length) throw new Error("no transactions found (scanned PDFs need the bank's CSV export instead)");
+    for (const t of txs) {
+      const cat = Categories.suggest(t.description);
+      all.push({ ...t, account, category: cat, suggested: !!cat });
+    }
+    loaded.add(key);
+    status(file.name + ': ' + txs.length + ' rows from ' + account + ' (' + note + ')', ok ? 'ok' : 'bad');
+  } catch (e) { status(file.name + ': ' + e.message, 'bad'); }
+}
+
+function visible() {
+  const m = $('month').value;
+  return all.filter(r => !m || r.date.startsWith(m)).sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+}
+
+function refreshMonths() {
+  const cur = $('month').value;
+  const months = [...new Set(all.map(r => r.date.slice(0, 7)))].sort();
+  $('month').innerHTML = '<option value="">All dates</option>' + months.map(m => '<option value="' + m + '">' + m + '</option>').join('');
+  $('month').value = months.includes(cur) ? cur : '';
+}
+
+function updateCount() {
+  const rows = visible();
+  $('count').textContent = rows.length + ' rows, ' + rows.filter(r => !r.category).length + ' without a category';
 }
 
 function render() {
-  $('count').textContent = data.length + ' transactions';
-  $('rows').innerHTML = '';
-  for (const r of data) {
+  $('result').hidden = !all.length;
+  if (!all.length) return;
+  updateCount();
+  const tbody = $('rows'); tbody.innerHTML = '';
+  for (const r of visible()) {
     const tr = document.createElement('tr');
-    for (const [v, cls] of [[r.date, ''], [r.description, ''], [r.amount.toFixed(2), 'amt' + (r.amount < 0 ? ' neg' : '')]]) {
+    tr.className = r.category ? (r.suggested ? 'suggested' : '') : 'empty';
+    for (const [v, cls] of [[r.date, ''], [r.description, ''], [r.amount.toFixed(2), 'amt' + (r.amount < 0 ? ' neg' : '')], [r.account, '']]) {
       const td = document.createElement('td'); td.textContent = v; td.className = cls; tr.appendChild(td);
     }
-    $('rows').appendChild(tr);
+    const td = document.createElement('td');
+    const sel = document.createElement('select');
+    sel.innerHTML = '<option value=""></option>' + Categories.CATEGORIES.map(c => '<option>' + c + '</option>').join('');
+    sel.value = r.category;
+    sel.onchange = () => { r.category = sel.value; r.suggested = false; tr.className = r.category ? '' : 'empty'; updateCount(); };
+    td.appendChild(sel); tr.appendChild(td); tbody.appendChild(tr);
   }
-  $('result').hidden = false;
 }
 
-function sheet() {
-  const ws = XLSX.utils.json_to_sheet(data.map(r => ({ Date: r.date, 'Charge Description': r.description, Amount: r.amount })));
-  ws['!cols'] = [{ wch: 12 }, { wch: 50 }, { wch: 12 }];
-  return ws;
+async function handle(files) {
+  $('msg').textContent = '';
+  for (const f of files) await handleFile(f);
+  refreshMonths(); render();
 }
-$('xlsx').onclick = () => { const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, sheet(), 'Transactions'); XLSX.writeFile(wb, baseName + '.xlsx'); };
-$('csv').onclick = () => {
-  const blob = new Blob([XLSX.utils.sheet_to_csv(sheet())], { type: 'text/csv' });
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = baseName + '.csv'; a.click();
+
+$('month').onchange = render;
+$('clear').onclick = () => { all = []; loaded.clear(); $('files').innerHTML = ''; $('msg').textContent = ''; $('copied').textContent = ''; refreshMonths(); render(); };
+$('copy').onclick = async () => {
+  await navigator.clipboard.writeText(Export.toTSV(visible(), false));
+  $('copied').textContent = 'Copied ' + visible().length + ' rows. Paste into Excel (no header row).';
+};
+function download(blob, name) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); }
+$('csv').onclick = () => download(new Blob([Export.toCSV(visible())], { type: 'text/csv' }), 'expenses.csv');
+$('xlsx').onclick = async () => {
+  const wb = Export.buildWorkbook(ExcelJS, visible(), Categories.CATEGORIES);
+  download(new Blob([await wb.xlsx.writeBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'expenses.xlsx');
 };
 
 const drop = $('drop');
 drop.onclick = () => $('file').click();
-$('file').onchange = e => e.target.files[0] && handle(e.target.files[0]);
+$('file').onchange = e => { handle([...e.target.files]); e.target.value = ''; };
 drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
 drop.ondragleave = () => drop.classList.remove('over');
-drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); e.dataTransfer.files[0] && handle(e.dataTransfer.files[0]); };
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); handle([...e.dataTransfer.files]); };
 </script>
 </body>
 </html>

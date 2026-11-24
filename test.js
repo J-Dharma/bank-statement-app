@@ -44,3 +44,12 @@ assert.equal(a.format,'Ally Bank statement'); assert.equal(a.transactions.length
 assert.equal(a.transactions[0].amount,40); assert.equal(a.transactions[0].description,'NOW Withdrawal Requested transfer to X (SOME CREDIT UNION Checking XXXX)');
 assert.equal(a.transactions[1].amount,-1.5); assert.ok(a.check.ok);
 console.log('ally ok');
+
+// Category suggestions: word-boundary regression (SAN MARCOS must not look like ARCO gas) and key merchants
+const C = require('./categories.js');
+assert.equal(C.suggest('HOBBY SHOP SAN MARCOS CA'), '');
+assert.equal(C.suggest('CHEVRON 0388461 ESCONDIDO CA'), 'Gasoline');
+assert.equal(C.suggest('TRADER JOE S #105 ESCONDIDO CA'), 'Groceries');
+assert.equal(C.suggest('AUTOMATIC PAYMENT - THANK YOU'), 'Transfer / Ignore');
+assert.equal(C.suggest('AMAZON MKTPL*593SP7BB0 Amzn.com/bill WA'), '');
+console.log('categories ok');
