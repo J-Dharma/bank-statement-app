@@ -5,9 +5,6 @@
   function buildWorkbook(ExcelJS, rows, categories) {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Expenses', { views: [{ state: 'frozen', ySplit: 1 }] });
-    const lists = wb.addWorksheet('Lists');
-    categories.forEach((c, i) => { lists.getCell(i + 1, 1).value = c; });
-    lists.state = 'hidden';
 
     ws.columns = [
       { header: 'Amount', key: 'amount', width: 12, style: { numFmt: '#,##0.00;-#,##0.00' } },
@@ -17,15 +14,21 @@
       { header: 'Category', key: 'category', width: 26 },
     ];
     ws.getRow(1).font = { bold: true };
-    const rule = { type: 'list', allowBlank: true, formulae: ['Lists!$A$1:$A$' + categories.length] };
+    const rule = { type: 'list', allowBlank: true, formulae: ['$H$2:$H$' + (categories.length + 1)] };
     rows.forEach(r => {
       const [y, m, d] = r.date.split('-').map(Number);
-      const row = ws.addRow({ date: new Date(Date.UTC(y, m - 1, d)), description: r.description, amount: r.amount, account: r.account, category: r.category || '' });
-      row.getCell(5).dataValidation = rule;
+      ws.addRow({ date: new Date(Date.UTC(y, m - 1, d)), description: r.description, amount: r.amount, account: r.account, category: r.category || '' });
     });
-    // Also allow categorizing rows added below later.
-    for (let n = rows.length + 2; n <= rows.length + 200; n++) ws.getCell(n, 5).dataValidation = rule;
+    // One rule for the whole Category column (data rows plus 200 spare rows for rows added later).
+    ws.dataValidations.add('E2:E' + (rows.length + 201), rule);
     ws.autoFilter = { from: 'A1', to: 'E1' };
+    // The category list lives on the same sheet (column H) so the dropdown survives copying the sheet to another workbook.
+    // Written after the data rows so addRow() doesn't append below it.
+    ws.getColumn(8).width = 26;
+    ws.getCell(1, 8).value = 'Category list (feeds the dropdown)';
+    ws.getCell(1, 8).font = { bold: true, color: { argb: 'FF888888' } };
+    categories.forEach((c, i) => { const cell = ws.getCell(i + 2, 8); cell.value = c; cell.font = { color: { argb: 'FF888888' } }; });
+
     return wb;
   }
 
