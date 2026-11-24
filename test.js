@@ -32,3 +32,15 @@ assert.equal(b.transactions.length,3); assert.equal(b.transactions[0].amount,25.
 assert.equal(b.transactions[1].amount,-3.29); assert.equal(b.transactions[1].date,'2026-10-14');
 assert.equal(b.transactions[2].description,'Credit Interest'); assert.ok(b.check.ok);
 console.log('bank ok');
+
+// Ally layout (synthetic): two accounts, credits/debits columns, wrapped transfer detail
+const ally = ['Date Description Credits Debits Balance','10/16/2026 Beginning Balance $100.00',
+ '10/27/2026 NOW Withdrawal $0.00 -$40.00 $60.00','Requested transfer to X','(SOME CREDIT UNION Checking XXXX)',
+ '11/15/2026 Interest Paid $1.50 -$0.00 $61.50','11/15/2026 Ending Balance $61.50',
+ 'Ally Bank Member FDIC STMTCMB100 05/2013','Date Description Credits Debits Balance','10/16/2026 Beginning Balance $10.00',
+ '11/15/2026 Interest Paid $0.07 -$0.00 $10.07','11/15/2026 Ending Balance $10.07'];
+const a = P.parseStatementPDF(ally);
+assert.equal(a.format,'Ally Bank statement'); assert.equal(a.transactions.length,3);
+assert.equal(a.transactions[0].amount,40); assert.equal(a.transactions[0].description,'NOW Withdrawal Requested transfer to X (SOME CREDIT UNION Checking XXXX)');
+assert.equal(a.transactions[1].amount,-1.5); assert.ok(a.check.ok);
+console.log('ally ok');

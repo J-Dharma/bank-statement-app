@@ -163,14 +163,51 @@
     return { transactions: tx, check, format: 'Bank account statement' };
   }
 
+  // Ally layout: per-account "Activity" tables with "Date Description Credits Debits Balance".
+  // Credits/debits are separate columns; wrapped lines under a row hold transfer details (kept in the description).
+  // Several accounts can share one PDF. Reconciled against the sum of beginning/ending balances across accounts.
+  function parseCreditsDebits(lines) {
+    const rowRe = /^(\d{2})\/(\d{2})\/(\d{4})\s+(.*?)\s+-?\$([\d,]+\.\d{2})\s+(-?)\$([\d,]+\.\d{2})\s+-?\$[\d,]+\.\d{2}$/;
+    const balRe = /^\d{2}\/\d{2}\/\d{4}\s+(Beginning|Ending) Balance\s+(-?)\$([\d,]+\.\d{2})$/;
+    const stop = /^\d{2}\/\d{2}\/\d{4}\s|Ally Bank Member|^\d{5,}\/|COMBINED CUST|^Activity$|^Date Description/;
+    const tx = []; let begin = 0, end = 0, sawBal = false, last = null;
+    for (const line of lines) {
+      const b = line.match(balRe);
+      if (b) { const v = money(b[3]) * (b[2] ? -1 : 1); if (b[1] === 'Beginning') begin += v; else end += v; sawBal = true; last = null; continue; }
+      const m = line.match(rowRe);
+      if (m) {
+        // the row regex captures only the credit/debit sign of the debit column; recompute from the two amounts
+        const amts = line.match(/-?\$[\d,]+\.\d{2}/g);
+        const credit = money(amts[amts.length - 3].replace(/[-$]/g, ''));
+        const debit = money(amts[amts.length - 2].replace(/[-$]/g, ''));
+        const net = Math.round((credit - debit) * 100) / 100;
+        last = null;
+        if (net === 0) continue;
+        last = { date: fmt(m[3], m[1], m[2]), description: m[4].replace(/\s+/g, ' ').trim(), amount: -net };
+        tx.push(last);
+      } else if (last && !stop.test(line)) {
+        last.description += ' ' + line.replace(/\s+/g, ' ').trim();
+      } else last = null;
+    }
+    let check = null;
+    if (sawBal) {
+      const expected = Math.round((end - begin) * 100) / 100;
+      const got = Math.round(-tx.reduce((a, t) => a + t.amount, 0) * 100) / 100;
+      check = { expected, got, ok: Math.abs(expected - got) < 0.005 };
+    }
+    tx.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    return { transactions: tx, check, format: 'Ally Bank statement' };
+  }
+
   // Entry point for PDFs: pick a bank-specific parser if one matches, else the generic one.
   function parseStatementPDF(lines) {
     if (lines.some(l => /Merchant Name or Transaction Description/.test(l)) && lines.some(l => /chase\.com/i.test(l)))
       return parseChaseCard(lines);
+    if (lines.some(l => /^Date Description Credits Debits Balance/.test(l))) return parseCreditsDebits(lines);
     if (lines.some(l => /^Post Date\s+Description\s+Amount\s+Balance/.test(l))) return parseRunningBalance(lines);
     return { transactions: parseStatementLines(lines, lines.join(' ')), check: null, format: 'generic' };
   }
 
-  const api = { parseCSV, parseAmount, normDate, parseCSVStatement, parseStatementLines, parseChaseCard, parseRunningBalance, parseStatementPDF };
+  const api = { parseCSV, parseAmount, normDate, parseCSVStatement, parseStatementLines, parseChaseCard, parseRunningBalance, parseCreditsDebits, parseStatementPDF };
   if (typeof module !== 'undefined') module.exports = api; else root.Parser = api;
 })(this);
