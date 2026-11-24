@@ -44,7 +44,8 @@
   }
   function fmt(y, m, d) { return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`; }
 
-  // Returns [{date, description, amount}]. Expenses negative, deposits positive.
+  // Returns [{date, description, amount}]. Convention everywhere: expenses positive, deposits negative.
+  // (Most bank CSVs list money out as negative, so we flip.)
   function parseCSVStatement(text) {
     const rows = parseCSV(text);
     // find header row: first row with a date-ish column and an amount-ish column
@@ -75,7 +76,7 @@
         else if (c != null) amount = Math.abs(c);
       }
       if (amount == null) continue;
-      out.push({ date, description: (r[descIdx] || '').replace(/\s+/g, ' ').trim(), amount });
+      out.push({ date, description: (r[descIdx] || '').replace(/\s+/g, ' ').trim(), amount: -amount });
     }
     return out;
   }
@@ -107,8 +108,8 @@
   const money = s => Math.round(parseFloat(s.replace(/,/g, '')) * 100) / 100;
 
   // Chase credit card layout: MM/DD <description> <amount>, inside "ACCOUNT ACTIVITY" sections.
-  // Statement signs: charges positive, payments/credits negative. We flip them so that
-  // money out is negative (same as most CSV exports), and reconcile against the summary box.
+  // Statement signs already match our convention (charges positive, payments/credits negative).
+  // Reconciled against the balance change in the summary box.
   function parseChaseCard(lines) {
     const text = lines.join('\n');
     const cd = text.match(/Opening\/Closing Date\s+(\d{2})\/(\d{2})\/(\d{2})\s*-\s*(\d{2})\/(\d{2})\/(\d{2})/);
@@ -125,7 +126,7 @@
       const month = +m[1];
       const year = month > closeMonth ? closeYear - 1 : closeYear;
       const stmtAmount = money(m[4].replace('$', ''));
-      tx.push({ date: fmt(year, m[1], m[2]), description: m[3].replace(/\s+/g, ' ').trim(), amount: -stmtAmount, _stmt: stmtAmount });
+      tx.push({ date: fmt(year, m[1], m[2]), description: m[3].replace(/\s+/g, ' ').trim(), amount: stmtAmount });
     }
     tx.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)); // stable: statement lists in posting order
     let check = null;
@@ -133,20 +134,43 @@
     const next = text.match(/^New Balance\s+(-?)\$([\d,]+\.\d{2})/m);
     if (prev && next) {
       const expected = Math.round((money(next[2]) * (next[1] ? -1 : 1) - money(prev[2]) * (prev[1] ? -1 : 1)) * 100) / 100;
-      const got = Math.round(tx.reduce((a, t) => a + t._stmt, 0) * 100) / 100;
+      const got = Math.round(tx.reduce((a, t) => a + t.amount, 0) * 100) / 100;
       check = { expected, got, ok: Math.abs(expected - got) < 0.005 };
     }
-    tx.forEach(t => delete t._stmt);
     return { transactions: tx, check, format: 'Chase credit card' };
+  }
+
+  // Bank account layout: "MM-DD-YYYY [Eff. MM-DD] <description> <-$amount> <$balance>", with wrapped detail lines.
+  // Statement shows withdrawals negative; we flip so expenses are positive. Reconciled against beginning/ending balances.
+  function parseRunningBalance(lines) {
+    const rowRe = /^(\d{2})-(\d{2})-(\d{4})\s+(?:Eff\.\s*\d{2}-\d{2}\s+)?(.*?)\s+(-?)\$([\d,]+\.\d{2})\s+(-?)\$[\d,]+\.\d{2}$/;
+    const balRe = /^(BEGINNING|ENDING) BALANCE\s+(-?)\$([\d,]+\.\d{2})/;
+    const tx = []; let begin = 0, end = 0, sawBal = false;
+    for (const line of lines) {
+      const b = line.match(balRe);
+      if (b) { const v = money(b[3]) * (b[2] ? -1 : 1); if (b[1] === 'BEGINNING') begin += v; else end += v; sawBal = true; continue; }
+      const m = line.match(rowRe);
+      if (!m) continue;
+      const stmt = money(m[6]) * (m[5] ? -1 : 1);
+      tx.push({ date: fmt(m[3], m[1], m[2]), description: m[4].replace(/\s+/g, ' ').trim(), amount: -stmt });
+    }
+    let check = null;
+    if (sawBal) {
+      const expected = Math.round((end - begin) * 100) / 100;
+      const got = Math.round(-tx.reduce((a, t) => a + t.amount, 0) * 100) / 100;
+      check = { expected, got, ok: Math.abs(expected - got) < 0.005 };
+    }
+    return { transactions: tx, check, format: 'Bank account statement' };
   }
 
   // Entry point for PDFs: pick a bank-specific parser if one matches, else the generic one.
   function parseStatementPDF(lines) {
     if (lines.some(l => /Merchant Name or Transaction Description/.test(l)) && lines.some(l => /chase\.com/i.test(l)))
       return parseChaseCard(lines);
+    if (lines.some(l => /^Post Date\s+Description\s+Amount\s+Balance/.test(l))) return parseRunningBalance(lines);
     return { transactions: parseStatementLines(lines, lines.join(' ')), check: null, format: 'generic' };
   }
 
-  const api = { parseCSV, parseAmount, normDate, parseCSVStatement, parseStatementLines, parseChaseCard, parseStatementPDF };
+  const api = { parseCSV, parseAmount, normDate, parseCSVStatement, parseStatementLines, parseChaseCard, parseRunningBalance, parseStatementPDF };
   if (typeof module !== 'undefined') module.exports = api; else root.Parser = api;
 })(this);

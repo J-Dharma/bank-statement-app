@@ -14,7 +14,7 @@
   table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
   th, td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid #e3e3e3; }
   td.amt, th.amt { text-align: right; font-variant-numeric: tabular-nums; }
-  td.neg { color: #b3261e; }
+  td.neg { color: #1e7b34; }
   button { padding: .5rem 1rem; border-radius: 8px; border: 1px solid #2a6df4; background: #2a6df4; color: #fff; cursor: pointer; font-size: 1rem; }
   button.secondary { background: #fff; color: #2a6df4; }
   #actions { margin-top: 1rem; display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
@@ -24,7 +24,7 @@
 </head>
 <body>
 <h1>Statement to Spreadsheet</h1>
-<p class="sub">Upload a bank statement (CSV or PDF) and get a spreadsheet of date, description, and amount.
+<p class="sub">Upload a bank statement (CSV or PDF) and get a spreadsheet of date, description, and amount. Expenses are positive and deposits are negative.
 Everything runs in your browser. Nothing is uploaded anywhere.</p>
 
 <div id="drop">Drop a statement here, or click to choose a file
@@ -38,12 +38,12 @@ Everything runs in your browser. Nothing is uploaded anywhere.</p>
     <button id="csv" class="secondary">Download .csv</button>
   </div>
   <p class="note" id="check" hidden></p>
-  <p class="note" id="pdfnote" hidden>PDF parsing is best-effort. Check the amounts and signs below, since many PDFs show purchases as positive numbers.</p>
+  <p class="note" id="pdfnote" hidden>PDF parsing is best-effort. Check the amounts and signs below. This layout isn't recognized, so signs are as printed on the statement.</p>
   <table><thead><tr><th>Date</th><th>Description</th><th class="amt">Amount</th></tr></thead><tbody id="rows"></tbody></table>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="parser.js?v=3"></script>
+<script src="parser.js?v=4"></script>
 <script type="module">
 import * as pdfjsLib from 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.min.mjs';
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.worker.min.mjs';
@@ -77,10 +77,11 @@ function showCheck(res) {
   const el = $('check'); el.hidden = false; el.className = 'note';
   if (res.check) {
     el.textContent = res.check.ok
-      ? `Detected: ${res.format}. Totals match the statement's balance change.`
+      ? `Detected: ${res.format}. Totals match the statement's balance change. Expenses are positive, deposits negative.`
       : `Detected: ${res.format}. Warning: parsed transactions total ${res.check.got.toFixed(2)} but the statement's balance changed by ${res.check.expected.toFixed(2)}. Some rows may be missing.`;
     if (!res.check.ok) el.style.color = '#b3261e'; else el.style.color = '#1e7b34';
   } else el.textContent = `Detected: ${res.format}.`;
+  if (!res.check || res.check.ok) el.style.color = res.check ? '#1e7b34' : '';
 }
 
 async function handle(file) {
