@@ -1,6 +1,6 @@
 // Builds the Excel workbook (ExcelJS is passed in so this runs in the browser and in Node tests).
 (function (root) {
-  const COLS = ['Date', 'Description', 'Amount', 'Account', 'Category'];
+  const COLS = ['Amount', 'Description', 'Date', 'Account', 'Category'];
 
   function buildWorkbook(ExcelJS, rows, categories) {
     const wb = new ExcelJS.Workbook();
@@ -10,9 +10,9 @@
     lists.state = 'hidden';
 
     ws.columns = [
-      { header: 'Date', key: 'date', width: 12, style: { numFmt: 'yyyy-mm-dd' } },
-      { header: 'Description', key: 'description', width: 52 },
       { header: 'Amount', key: 'amount', width: 12, style: { numFmt: '#,##0.00;-#,##0.00' } },
+      { header: 'Description', key: 'description', width: 52 },
+      { header: 'Date', key: 'date', width: 12, style: { numFmt: 'yyyy-mm-dd' } },
       { header: 'Account', key: 'account', width: 12 },
       { header: 'Category', key: 'category', width: 26 },
     ];
@@ -32,13 +32,13 @@
   function toTSV(rows, withHeader) {
     const clean = s => String(s).replace(/[\t\r\n]+/g, ' ');
     const out = withHeader ? [COLS.join('\t')] : [];
-    for (const r of rows) out.push([r.date, clean(r.description), r.amount.toFixed(2), r.account, r.category || ''].join('\t'));
+    for (const r of rows) out.push([r.amount.toFixed(2), clean(r.description), r.date, r.account, r.category || ''].join('\t'));
     return out.join('\n');
   }
 
   function toCSV(rows) {
     const q = s => /[",\n]/.test(s) ? '"' + String(s).replace(/"/g, '""') + '"' : String(s);
-    return [COLS.join(','), ...rows.map(r => [r.date, q(r.description), r.amount.toFixed(2), q(r.account), q(r.category || '')].join(','))].join('\n');
+    return [COLS.join(','), ...rows.map(r => [r.amount.toFixed(2), q(r.description), r.date, q(r.account), q(r.category || '')].join(','))].join('\n');
   }
 
   const api = { COLS, buildWorkbook, toTSV, toCSV };

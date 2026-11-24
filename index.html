@@ -31,7 +31,7 @@
 </head>
 <body>
 <h1>Statement to Spreadsheet</h1>
-<p class="sub">Upload all of a month's statements (CSV or PDF) and get one combined list of date, description and amount, with a Category column.
+<p class="sub">Upload all of a month's statements (CSV or PDF) and get one combined list of amount, description and date, with Account and Category columns.
 Expenses are positive and deposits are negative. Everything runs in your browser. Nothing is uploaded anywhere.</p>
 
 <div id="drop">Drop statements here (several at once is fine), or click to choose
@@ -53,13 +53,13 @@ Expenses are positive and deposits are negative. Everything runs in your browser
     <button id="clear" class="secondary">Start over</button>
     <span class="note" id="copied"></span>
   </div>
-  <table><thead><tr><th>Date</th><th>Description</th><th class="amt">Amount</th><th>Account</th><th>Category</th></tr></thead><tbody id="rows"></tbody></table>
+  <table><thead><tr><th class="amt">Amount</th><th>Description</th><th>Date</th><th>Account</th><th>Category</th></tr></thead><tbody id="rows"></tbody></table>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-<script src="parser.js?v=6"></script>
-<script src="categories.js?v=6"></script>
-<script src="export.js?v=6"></script>
+<script src="parser.js?v=7"></script>
+<script src="categories.js?v=7"></script>
+<script src="export.js?v=7"></script>
 <script type="module">
 import * as pdfjsLib from 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.min.mjs';
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.worker.min.mjs';
@@ -149,7 +149,7 @@ function render() {
   for (const r of visible()) {
     const tr = document.createElement('tr');
     tr.className = r.category ? (r.suggested ? 'suggested' : '') : 'empty';
-    for (const [v, cls] of [[r.date, ''], [r.description, ''], [r.amount.toFixed(2), 'amt' + (r.amount < 0 ? ' neg' : '')], [r.account, '']]) {
+    for (const [v, cls] of [[r.amount.toFixed(2), 'amt' + (r.amount < 0 ? ' neg' : '')], [r.description, ''], [r.date, ''], [r.account, '']]) {
       const td = document.createElement('td'); td.textContent = v; td.className = cls; tr.appendChild(td);
     }
     const td = document.createElement('td');
